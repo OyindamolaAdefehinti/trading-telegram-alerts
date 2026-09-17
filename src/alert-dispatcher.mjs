@@ -29,6 +29,7 @@ export function createAlertEnvelope({
   priority = 'NORMAL',
   eventKey = null,
   metadata = {},
+  replyMarkup = null,
   now = Date.now,
 } = {}) {
   const cleanType = String(type ?? '').trim();
@@ -45,6 +46,7 @@ export function createAlertEnvelope({
     created_at: createdAt,
     text: cleanText,
     metadata: metadata ?? {},
+    ...(replyMarkup ? { replyMarkup } : {}),
   };
 }
 
