@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { AlertDispatcher, createAlertEnvelope } from './alert-dispatcher.mjs';
+import { AlertDispatcher, createAlertEnvelope, recentAlertsFromState } from './alert-dispatcher.mjs';
 import { chunkText, TelegramAlertTransport, buildConfiguredTransports } from './alert-transports.mjs';
 
 // --- createAlertEnvelope ---
@@ -63,6 +63,35 @@ class MemoryStateStore {
   const result2 = await dispatcher2.dispatch(env);
   assert.equal(result2.delivered, true);
   assert.equal(transport2.calls, 0, 'duplicate envelope should not hit the transport again');
+}
+
+// --- AlertDispatcher: recent delivery log (human-readable audit trail for /alerts/recent) ---
+{
+  const store = new MemoryStateStore();
+  const okTransport = new FlakyTransport('telegram', 0);
+  okTransport.remote = true;
+  const dispatcher = new AlertDispatcher({ transports: [okTransport], stateStore: store, retryDelaysMs: [0], sleepImpl: async () => {} });
+  await dispatcher.dispatch(createAlertEnvelope({ type: 'CONFIRMED_SETUP', text: 'BOOM1000 CONFIRMED', eventKey: 'confirmed:boom1000:1' }));
+
+  const failTransport = new FlakyTransport('telegram', 99);
+  failTransport.remote = true;
+  const dispatcher2 = new AlertDispatcher({ transports: [failTransport], stateStore: store, maxAttempts: 1, retryDelaysMs: [0], sleepImpl: async () => {} });
+  await dispatcher2.dispatch(createAlertEnvelope({ type: 'CONFIRMED_SETUP', text: 'CRASH500 CONFIRMED', eventKey: 'confirmed:crash500:1' }));
+
+  const recent = recentAlertsFromState(store.snapshot());
+  assert.equal(recent.length, 2);
+  assert.equal(recent[0].event_key, 'confirmed:crash500:1', 'most recent entry first');
+  assert.equal(recent[0].ok, false);
+  assert.ok(recent[0].error, 'failed entries carry the error message');
+  assert.equal(recent[1].event_key, 'confirmed:boom1000:1');
+  assert.equal(recent[1].ok, true);
+
+  const limited = recentAlertsFromState(store.snapshot(), { limit: 1 });
+  assert.equal(limited.length, 1);
+  assert.equal(limited[0].event_key, 'confirmed:crash500:1');
+
+  const sinceFuture = recentAlertsFromState(store.snapshot(), { sinceEpoch: Math.floor(Date.now() / 1000) + 999 });
+  assert.equal(sinceFuture.length, 0, 'sinceEpoch filters out everything before that point');
 }
 
 // --- buildConfiguredTransports ---

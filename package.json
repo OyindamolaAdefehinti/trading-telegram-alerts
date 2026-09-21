@@ -1,6 +1,6 @@
 {
   "name": "trading-telegram-alerts",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Shared Telegram/webhook alert dispatch pipeline for trading bots (retry, idempotent dedup, chunked delivery).",
   "type": "module",
   "main": "src/index.mjs",

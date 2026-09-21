@@ -14,13 +14,36 @@ function nowIso(now) {
 
 function normaliseDeliveryState(state) {
   if (!state.notification_delivery || typeof state.notification_delivery !== 'object') {
-    state.notification_delivery = { delivered: {}, failed: [], last_remote_success_epoch: null };
+    state.notification_delivery = { delivered: {}, failed: [], recent: [], last_remote_success_epoch: null };
   }
   if (!state.notification_delivery.delivered || typeof state.notification_delivery.delivered !== 'object') {
     state.notification_delivery.delivered = {};
   }
   if (!Array.isArray(state.notification_delivery.failed)) state.notification_delivery.failed = [];
+  if (!Array.isArray(state.notification_delivery.recent)) state.notification_delivery.recent = [];
   return state.notification_delivery;
+}
+
+const RECENT_LOG_MAX = 300;
+
+// A human-readable, chronological audit trail -- the `delivered`/`failed` maps above are keyed by
+// opaque hashes and exist purely for dedup lookups, so answering "was X actually sent, and when"
+// required guessing at Railway logs that may not even be retained. This is queried directly via
+// the health server's /alerts/recent endpoint instead.
+function appendRecentLog(delivery, envelope, result) {
+  delivery.recent.push({
+    epoch: result.epoch,
+    type: envelope.type,
+    event_key: envelope.event_key,
+    transport: result.transport,
+    remote: result.remote === true,
+    ok: result.ok === true,
+    error: result.ok ? null : (result.error ?? null),
+    summary: envelope.text.length > 160 ? `${envelope.text.slice(0, 160)}...` : envelope.text,
+  });
+  if (delivery.recent.length > RECENT_LOG_MAX) {
+    delivery.recent = delivery.recent.slice(delivery.recent.length - RECENT_LOG_MAX);
+  }
 }
 
 export function createAlertEnvelope({
@@ -102,6 +125,7 @@ export class AlertDispatcher {
         });
         delivery.failed = delivery.failed.slice(-300);
       }
+      appendRecentLog(delivery, envelope, { ...result, epoch });
     });
   }
 
@@ -166,4 +190,14 @@ export class AlertDispatcher {
       results,
     };
   }
+}
+
+// Reads the human-readable delivery audit trail written by appendRecentLog() above. Used by each
+// bot's health server to answer "what actually got sent, and when" without needing Railway log
+// access -- see /alerts/recent in stage9-health-server.mjs.
+export function recentAlertsFromState(state = {}, { limit = 100, sinceEpoch = null } = {}) {
+  const recent = Array.isArray(state?.notification_delivery?.recent) ? state.notification_delivery.recent : [];
+  const filtered = sinceEpoch != null ? recent.filter((row) => Number(row.epoch) >= Number(sinceEpoch)) : recent;
+  const bounded = Math.max(1, Math.min(300, Number(limit) || 100));
+  return filtered.slice(-bounded).reverse();
 }

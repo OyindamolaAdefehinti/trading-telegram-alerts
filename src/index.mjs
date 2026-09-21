@@ -1,4 +1,4 @@
-export { AlertDispatcher, createAlertEnvelope } from './alert-dispatcher.mjs';
+export { AlertDispatcher, createAlertEnvelope, recentAlertsFromState } from './alert-dispatcher.mjs';
 export {
   ConsoleAlertTransport,
   GenericWebhookTransport,
